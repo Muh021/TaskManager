@@ -1,0 +1,202 @@
+public class TaskItem : INotifyPropertyChanged
+{
+    public int TaskId { get; set; }
+
+    private string taskName;
+    public string TaskName
+    {
+        get => taskName;
+        set { taskName = value; OnPropertyChanged(nameof(TaskName)); }
+    }
+
+    public string Description { get; set; }
+
+    public string Priority { get; set; } // "Low", "Medium", "High"
+
+    public DateTime DueDate { get; set; }
+
+    public string Category { get; set; } // "Personal", "Work", etc.
+
+    public string Status { get; set; } // "Complete", "Incomplete"
+
+    public event PropertyChangedEventHandler PropertyChanged;
+    protected void OnPropertyChanged(string name)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    }
+}
+
+public static class DatabaseHelper
+{
+    private static string dbFile = "Tasks.db";
+
+    public static void InitializeDatabase()
+    {
+        if (!File.Exists(dbFile))
+        {
+            SQLiteConnection.CreateFile(dbFile);
+            using (var conn = new SQLiteConnection($"Data Source={dbFile};Version=3;"))
+            {
+                conn.Open();
+                string sql = @"
+                CREATE TABLE Tasks (
+                    TaskId INTEGER PRIMARY KEY AUTOINCREMENT,
+                    TaskName TEXT NOT NULL,
+                    Description TEXT,
+                    Priority TEXT,
+                    DueDate TEXT,
+                    Category TEXT,
+                    Status TEXT
+                );";
+                SQLiteCommand command = new SQLiteCommand(sql, conn);
+                command.ExecuteNonQuery();
+            }
+        }
+    }
+
+    public static List<TaskItem> GetTasks()
+    {
+        var tasks = new List<TaskItem>();
+        using (var conn = new SQLiteConnection($"Data Source={dbFile};Version=3;"))
+        {
+            conn.Open();
+            string sql = "SELECT * FROM Tasks";
+            SQLiteCommand command = new SQLiteCommand(sql, conn);
+            SQLiteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                tasks.Add(new TaskItem
+                {
+                    TaskId = Convert.ToInt32(reader["TaskId"]),
+                    TaskName = reader["TaskName"].ToString(),
+                    Description = reader["Description"].ToString(),
+                    Priority = reader["Priority"].ToString(),
+                    DueDate = DateTime.Parse(reader["DueDate"].ToString()),
+                    Category = reader["Category"].ToString(),
+                    Status = reader["Status"].ToString()
+                });
+            }
+        }
+        return tasks;
+    }
+
+    // Implement methods for AddTask, UpdateTask, DeleteTask
+}
+
+public partial class MainWindow : Window
+{
+    public ObservableCollection<TaskItem> Tasks { get; set; }
+
+    public MainWindow()
+    {
+        InitializeComponent();
+        DatabaseHelper.InitializeDatabase();
+        LoadTasks();
+        this.DataContext = this;
+    }
+
+    private void LoadTasks()
+    {
+        var taskList = DatabaseHelper.GetTasks();
+        Tasks = new ObservableCollection<TaskItem>(taskList);
+    }
+}
+private void AddTask_Click(object sender, RoutedEventArgs e)
+{
+    var addTaskWindow = new AddEditTaskWindow();
+    if (addTaskWindow.ShowDialog() == true)
+    {
+        var newTask = addTaskWindow.Task;
+        DatabaseHelper.AddTask(newTask);
+        Tasks.Add(newTask);
+    }
+}
+private void EditTask_Click(object sender, RoutedEventArgs e)
+{
+    if (TaskDataGrid.SelectedItem is TaskItem selectedTask)
+    {
+        var editTaskWindow = new AddEditTaskWindow(selectedTask);
+        if (editTaskWindow.ShowDialog() == true)
+        {
+            DatabaseHelper.UpdateTask(editTaskWindow.Task);
+            LoadTasks(); // Reload tasks to reflect changes
+        }
+    }
+    else
+    {
+        MessageBox.Show("Please select a task to edit.");
+    }
+}
+private void DeleteTask_Click(object sender, RoutedEventArgs e)
+{
+    if (TaskDataGrid.SelectedItem is TaskItem selectedTask)
+    {
+        DatabaseHelper.DeleteTask(selectedTask.TaskId);
+        Tasks.Remove(selectedTask);
+    }
+    else
+    {
+        MessageBox.Show("Please select a task to delete.");
+    }
+}
+private void CheckBox_Checked(object sender, RoutedEventArgs e)
+{
+    if (((FrameworkElement)sender).DataContext is TaskItem task)
+    {
+        task.Status = "Complete";
+        DatabaseHelper.UpdateTask(task);
+    }
+}
+
+private void CheckBox_Unchecked(object sender, RoutedEventArgs e)
+{
+    if (((FrameworkElement)sender).DataContext is TaskItem task)
+    {
+        task.Status = "Incomplete";
+        DatabaseHelper.UpdateTask(task);
+    }
+}
+
+private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+{
+    ApplyFilters();
+}
+
+private void StatusFilter_SelectionChanged(object sender, SelectionChangedEventArgs e)
+{
+    ApplyFilters();
+}
+
+private void PriorityFilter_SelectionChanged(object sender, SelectionChangedEventArgs e)
+{
+    ApplyFilters();
+}
+
+private void ApplyFilters()
+{
+    var filteredTasks = DatabaseHelper.GetTasks();
+
+    // Filter by search text
+    if (!string.IsNullOrEmpty(SearchBox.Text))
+    {
+        filteredTasks = filteredTasks.Where(t => t.TaskName.Contains(SearchBox.Text, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    // Filter by status
+    if (StatusFilter.SelectedItem is ComboBoxItem statusItem && statusItem.Content.ToString() != "All")
+    {
+        filteredTasks = filteredTasks.Where(t => t.Status == statusItem.Content.ToString()).ToList();
+    }
+
+    // Filter by priority
+    if (PriorityFilter.SelectedItem is ComboBoxItem priorityItem && priorityItem.Content.ToString() != "All")
+    {
+        filteredTasks = filteredTasks.Where(t => t.Priority == priorityItem.Content.ToString()).ToList();
+    }
+
+    Tasks.Clear();
+    foreach (var task in filteredTasks)
+    {
+        Tasks.Add(task);
+    }
+}
